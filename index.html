@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Selective Bloom with Two Cubes</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="css/main.css">
+</head>
+
+<body>
+    <!-- Vertex Shader -->
+    <script type="x-shader/x-vertex" id="vertexshader">
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    </script>
+
+    <!-- Fragment Shader -->
+    <script type="x-shader/x-fragment" id="fragmentshader">
+        uniform sampler2D baseTexture;
+        uniform sampler2D bloomTexture;
+        varying vec2 vUv;
+        void main() {
+            gl_FragColor = ( texture2D( baseTexture, vUv ) + vec4( 1.0 ) * texture2D( bloomTexture, vUv ) );
+        }
+    </script>
+
+    <!-- Main Script -->
+    <script type="module">
+
+        import * as THREE from './build/three.module.js';
+        import { OrbitControls } from './jsm/OrbitControls.js';
+        import { EffectComposer } from './jsm/EffectComposer.js';
+        import { RenderPass } from './jsm/RenderPass.js';
+        import { ShaderPass } from './jsm/ShaderPass.js';
+        import { UnrealBloomPass } from './jsm/UnrealBloomPass.js';
+        import { OutputPass } from './jsm/OutputPass.js';
+
+        // Bloom Layer
+        const BLOOM_SCENE = 1;
+        const bloomLayer = new THREE.Layers();
+        bloomLayer.set(BLOOM_SCENE);
+
+        // Bloom Parameters
+        const params = {
+            bloomStrength: 0.5,
+            bloomThreshold: 0,
+            bloomRadius: 0.2
+        };
+
+        const darkMaterial = new THREE.MeshBasicMaterial({ color: 'black' });
+        const materials = {};
+
+        // Renderer Initialization
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        document.body.appendChild(renderer.domElement);
+
+        // Scene and Camera
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.y = 15;
+        camera.lookAt(0, 0, 0);
+
+        const clock = new THREE.Clock();
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.update();
+
+        // Objects
+        // // Parameters for the shape
+        // const numPoints = 12;
+        // const minRadius = 4;
+        // const maxRadius = 5;
+        // const blobFactor = 0.5; // Controls the bulging
+
+        // // Create an array to store the control points
+        // const points = [];
+
+        // for (let i = 0; i < numPoints; i++) {
+        //     // Calculate angle for each point
+        //     const angle = (i / numPoints) * Math.PI * 2;
+
+        //     // Alternate the radius to create inward and outward curves
+        //     const r = i % 2 === 0 ? getRndFloat(minRadius, maxRadius) + blobFactor : getRndFloat(minRadius, maxRadius) - blobFactor;
+
+        //     // Calculate x and z positions for each control point (y = 0 for xz plane)
+        //     const x = Math.cos(angle) * r;
+        //     const z = Math.sin(angle) * r;
+
+        //     // Add the point to the array
+        //     points.push(new THREE.Vector3(x, 0, z)); // Setting y = 0 for xz plane
+        // }
+
+        // // Create a closed loop curve
+        // const curve = new THREE.CatmullRomCurve3(points, true);
+
+        // // Generate points along the curve to create a closed shape
+        // const splinePoints = curve.getPoints(100); // Increase for smoother curves
+
+        // // Convert to 2D points for Shape
+        // const shapePoints = splinePoints.map((point) => new THREE.Vector2(point.x, point.z));
+        // const blobShape = new THREE.Shape(shapePoints);
+
+        // // Generate geometry and material for the blob shape
+        // const geometry = new THREE.ShapeGeometry(blobShape);
+        // const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        // const mesh = new THREE.Mesh(geometry, material);
+
+        // // Rotate the mesh to lie on the xz plane
+        // mesh.rotation.x = -Math.PI / 2; // Rotate 90 degrees to align with xz plane
+        // scene.add(mesh);
+
+
+        // Parameters for the blobs
+        const numBlobs = 100; // Number of blobs to generate
+        const numPoints = 12;
+        const minRadius = 4;
+        const maxRadius = 5;
+        const blobFactor = 0.5; // Controls the bulging
+        const ySpacing = 1.0; // Distance between each blob along y-axis
+        const frequency = 0.2; // Controls how much each point oscillates with each blob
+
+        // Function to generate random float between min and max
+        function getRndFloat(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // Initialize base radii for the first blob
+        let baseRadii = Array.from({ length: numPoints }, () => getRndFloat(minRadius, maxRadius));
+
+        // Function to create and add a single blob to the scene
+        function createBlob(yPosition, blobIndex) {
+            const points = [];
+
+            for (let i = 0; i < numPoints; i++) {
+                // Calculate angle for each point
+                const angle = (i / numPoints) * Math.PI * 2;
+
+                // Apply a phase shift to the base radii for the current blob
+                const phaseShift = Math.sin(blobIndex + i * 0.5); // Incremental phase shift for variation
+
+                // Oscillated radius using sine wave, based on phase shift
+                const amplitude = (maxRadius - minRadius) / 2;
+                const baseRadius = (minRadius + maxRadius) / 2;
+                const oscillatedRadius = baseRadius + amplitude * Math.sin(frequency * blobIndex + angle);
+
+                // Adjust the radius based on the previous base radius and phase shift
+                const r = i % 2 === 0
+                    ? baseRadii[i] + blobFactor * Math.sin(oscillatedRadius + phaseShift)
+                    : baseRadii[i] - blobFactor * Math.sin(oscillatedRadius + phaseShift);
+
+                // Calculate x and z positions (y = 0 for xz plane)
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+
+                // Add the point to the array
+                points.push(new THREE.Vector3(x, 0, z)); // Setting y = 0 for xz plane
+            }
+
+            // Create a closed loop curve
+            const curve = new THREE.CatmullRomCurve3(points, true);
+
+            // Generate points along the curve to create a closed shape
+            const splinePoints = curve.getPoints(100);
+
+            // Convert to 2D points for Shape
+            const shapePoints = splinePoints.map((point) => new THREE.Vector2(point.x, point.z));
+            const blobShape = new THREE.Shape(shapePoints);
+
+            // Generate geometry and material for the blob shape
+            const geometry = new THREE.ShapeGeometry(blobShape);
+            const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()), side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(geometry, material);
+
+            // Rotate to lie on the xz plane and position along the y-axis
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.y = yPosition; // Stack along y-axis
+            scene.add(mesh);
+
+            // Update baseRadii for the next blob based on this one
+            baseRadii = baseRadii.map((r, index) => r + (Math.random() - 0.5) * 0.1); // Small random adjustment
+        }
+
+        // Function to render all blobs with phase shifting
+        function renderBlobs() {
+            for (let i = 0; i < numBlobs; i++) {
+                const yPosition = i * ySpacing;
+                createBlob(yPosition, i); // Pass the current blob index to adjust radius phase
+            }
+        }
+
+        // Call the function to render the blobs
+        renderBlobs();
+
+
+
+
+        scene.traverse((obj) => {
+            if (obj.isMesh) {
+                materials[obj.uuid] = obj.material;
+            }
+        });
+
+        // Post-Processing Setup
+        const renderScene = new RenderPass(scene, camera);
+
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), params.bloomStrength, params.bloomRadius, params.bloomThreshold);
+
+        const bloomComposer = new EffectComposer(renderer);
+        bloomComposer.renderToScreen = false;
+        bloomComposer.addPass(renderScene);
+        bloomComposer.addPass(bloomPass);
+
+        const finalPass = new ShaderPass(
+            new THREE.ShaderMaterial({
+                uniforms: {
+                    baseTexture: { value: null },
+                    bloomTexture: { value: bloomComposer.renderTarget2.texture }
+                },
+                vertexShader: document.getElementById('vertexshader').textContent,
+                fragmentShader: document.getElementById('fragmentshader').textContent,
+                defines: {}
+            }), 'baseTexture'
+        );
+        finalPass.needsSwap = true;
+
+        const finalComposer = new EffectComposer(renderer);
+        finalComposer.addPass(renderScene);
+        finalComposer.addPass(finalPass);
+        finalComposer.addPass(new OutputPass());
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            render();
+        }
+
+        // Render Function
+        function render() {
+            controls.update();
+            scene.traverse(darkenNonBloomed);
+            bloomComposer.render();
+            scene.traverse(restoreMaterial);
+            finalComposer.render();
+        }
+
+        // Functions to Darken Non-Bloomed Objects
+        function darkenNonBloomed(obj) {
+            if (obj.isMesh && bloomLayer.test(obj.layers) === false) {
+                materials[obj.uuid] = obj.material;
+                obj.material = darkMaterial;
+            }
+        }
+
+        function restoreMaterial(obj) {
+            if (materials[obj.uuid]) {
+                obj.material = materials[obj.uuid];
+            }
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', onWindowResize, false);
+
+        function onWindowResize() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+            bloomComposer.setSize(width, height);
+            finalComposer.setSize(width, height);
+        }
+
+        animate();
+
+    </script>
+</body>
+
+</html>
