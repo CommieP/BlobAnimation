@@ -2,10 +2,10 @@
 <html lang="en">
 
 <head>
-    <title>Selective Bloom with Two Cubes</title>
+    <title>Three Blob Towers with Selective Bloom</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-    <link rel="stylesheet" type="text/css" href="css/main.css">
+    <link rel="stylesheet" href="css/main.css">
 </head>
 
 <body>
@@ -30,21 +30,17 @@
 
     <!-- Main Script -->
     <script type="module">
-
         import * as THREE from './build/three.module.js';
-        import { OrbitControls } from './jsm/OrbitControls.js';
         import { EffectComposer } from './jsm/EffectComposer.js';
         import { RenderPass } from './jsm/RenderPass.js';
         import { ShaderPass } from './jsm/ShaderPass.js';
         import { UnrealBloomPass } from './jsm/UnrealBloomPass.js';
         import { OutputPass } from './jsm/OutputPass.js';
 
-        // Bloom Layer
         const BLOOM_SCENE = 1;
         const bloomLayer = new THREE.Layers();
         bloomLayer.set(BLOOM_SCENE);
 
-        // Bloom Parameters
         const params = {
             bloomStrength: 0.5,
             bloomThreshold: 0,
@@ -54,103 +50,101 @@
         const darkMaterial = new THREE.MeshBasicMaterial({ color: 'black' });
         const materials = {};
 
-        // Renderer Initialization
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.toneMapping = THREE.ReinhardToneMapping;
         document.body.appendChild(renderer.domElement);
 
-        // Scene and Camera
         const scene = new THREE.Scene();
-
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.y = -10;
-        camera.position.z = -35;
-        camera.lookAt(0, -50, -10)
+        camera.position.y = 5;
+        camera.position.z = 15;
+        camera.position.x = -25
+        camera.lookAt(-25, -15, -10);
 
-        const clock = new THREE.Clock();
+        const numPoints = 12;
+        const minRadius = 4;
+        const maxRadius = 6;
 
-        // Controls
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.update();
+        // Initialize radii arrays and directions for each tower
+        const towers = [
+            {
+                xOffset: 0, yOffset: 5, zOffset: -8, blobs: [], color: 0xff0000,
+                randomRadii: Array(numPoints).fill().map(() => getRndFloat(minRadius, maxRadius)),
+                directions: Array(numPoints).fill().map((_, i) => (i % 2 === 0 ? 1 : -1))
+            },
+            {
+                xOffset: -6, yOffset: 0, zOffset: 0, blobs: [], color: 0xbf05f7,
+                randomRadii: Array(numPoints).fill().map(() => getRndFloat(minRadius, maxRadius)),
+                directions: Array(numPoints).fill().map((_, i) => (i % 2 === 0 ? 1 : -1))
+            },
+            {
+                xOffset: 6, yOffset: -5, zOffset: 0, blobs: [], color: 0x0000ff,
+                randomRadii: Array(numPoints).fill().map(() => getRndFloat(minRadius, maxRadius)),
+                directions: Array(numPoints).fill().map((_, i) => (i % 2 === 0 ? 1 : -1))
+            }
+        ];
 
         function getRndFloat(min, max) {
             return Math.random() * (max - min) + min;
         }
 
-        //Objects
-        const blobs = [];
-        // Parameters for the shape
-        const numPoints = 12;
-        const minRadius = 4;
-        const maxRadius = 6;
+        // Function to update radii values for bulging effect
+        function updateValues(tower) {
+            if (!tower.randomRadii || !tower.directions) {
+                console.error("randomRadii or directions is undefined for tower:", tower);
+                return; // Stop if undefined
+            }
 
-        const randomRadii = Array.from({ length: numPoints }, () =>
-            Math.random() * (maxRadius - minRadius) + minRadius
-        );
-
-        // Initialize the directions array, with 1 for even indices (increment) and -1 for odd indices (decrement)
-        const directions = Array.from({ length: numPoints }, (_, i) => (i % 2 === 0 ? 1 : -1));
-
-        // Function to update values in randomRadii
-        function updateValues() {
-            for (let i = 0; i < randomRadii.length; i++) {
-                // Update the value based on its direction
-                randomRadii[i] += directions[i] * 0.01; // Adjust increment/decrement step as needed
-
-                // Reverse direction if a limit is reached
-                if (randomRadii[i] >= maxRadius) {
-                    randomRadii[i] = maxRadius; // Cap the value at maxRadius
-                    directions[i] = -1;          // Switch direction to decrement
-                } else if (randomRadii[i] <= minRadius) {
-                    randomRadii[i] = minRadius; // Cap the value at minRadius
-                    directions[i] = 1;          // Switch direction to increment
+            for (let i = 0; i < tower.randomRadii.length; i++) {
+                tower.randomRadii[i] += tower.directions[i] * 0.15;
+                if (tower.randomRadii[i] >= maxRadius) {
+                    tower.randomRadii[i] = maxRadius;
+                    tower.directions[i] = -1;
+                } else if (tower.randomRadii[i] <= minRadius) {
+                    tower.randomRadii[i] = minRadius;
+                    tower.directions[i] = 1;
                 }
-            } // Log to see the updated values
+            }
         }
 
-        function createBlob(yPosition = 0) {
-            let points = [];
+        // Create blob for a specific tower
+        function createBlob(yPosition, tower) {
+            updateValues(tower); 
+            const points = [];
             for (let i = 0; i < numPoints; i++) {
                 const angle = (i / numPoints) * Math.PI * 2;
-                const x = Math.cos(angle) * randomRadii[i];
-                const z = Math.sin(angle) * randomRadii[i];
+                const x = Math.cos(angle) * tower.randomRadii[i];
+                const z = Math.sin(angle) * tower.randomRadii[i];
                 points.push(new THREE.Vector3(x, 0, z));
-                updateValues();
             }
+
             const curve = new THREE.CatmullRomCurve3(points, true);
             const splinePoints = curve.getPoints(100);
             const shapePoints = splinePoints.map((point) => new THREE.Vector2(point.x, point.z));
             const blobShape = new THREE.Shape(shapePoints);
 
             const geometry = new THREE.ShapeGeometry(blobShape);
-            const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(Math.random(), Math.random(), Math.random()) });
-            const mesh = new THREE.Mesh(geometry, material);
+            const edges = new THREE.EdgesGeometry(geometry);
+            const lineMaterial = new THREE.LineBasicMaterial({ color: tower.color });
+            const line = new THREE.LineSegments(edges, lineMaterial);
 
-            mesh.rotation.x = -Math.PI / 2; // Align with xz plane
-            mesh.position.y = yPosition;    // Set initial y position
-            scene.add(mesh);
-            blobs.push(mesh);
+            line.rotation.x = -Math.PI / 2;
+            line.position.set(tower.xOffset, yPosition + tower.yOffset, tower.zOffset);
+            scene.add(line);
+            tower.blobs.push(line);
+
         }
 
-        // Initialize 10 blobs stacked along the y-axis
-        for (let i = -29; i < 1; i++) {  // Create blobs from y = -9 to y = 0
-            createBlob(i); // Adjust `i` to control spacing between blobs
-        }
-
-        // Generate points along the curve to create a closed shape
-
-
-        scene.traverse((obj) => {
-            if (obj.isMesh) {
-                materials[obj.uuid] = obj.material;
+        // Create initial blobs for each tower
+        towers.forEach(tower => {
+            for (let i = -79; i < 1; i++) {
+                createBlob(i, tower);
             }
         });
 
-        // Post-Processing Setup
         const renderScene = new RenderPass(scene, camera);
-
         const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), params.bloomStrength, params.bloomRadius, params.bloomThreshold);
 
         const bloomComposer = new EffectComposer(renderer);
@@ -176,37 +170,26 @@
         finalComposer.addPass(finalPass);
         finalComposer.addPass(new OutputPass());
 
-        // Animation Loop
         function animate() {
             requestAnimationFrame(animate);
-
-            // Update positions of blobs
-            blobs.forEach(blob => {
-                blob.position.y -= 0.1; // Move blobs downwards
+            towers.forEach(tower => {
+                tower.blobs.forEach(blob => blob.position.y -= 0.1);
+                if (tower.blobs[0] && tower.blobs[0].position.y < -80 + tower.yOffset) {
+                    const removedBlob = tower.blobs.shift();
+                    scene.remove(removedBlob);
+                    createBlob(0, tower);
+                }
             });
-
-            // Check for blobs that have moved below the threshold and reset them
-            if (blobs[0] && blobs[0].position.y < -30) {
-                const removedBlob = blobs.shift(); // Remove the lowest blob from the array
-                scene.remove(removedBlob); // Remove the blob from the scene
-
-                // Add a new blob at the top (y = 0)
-                createBlob(0); // Set new y position at the top (0, 0, 0)
-            }
-
             render();
         }
 
-        // Render Function
         function render() {
-            controls.update();
             scene.traverse(darkenNonBloomed);
             bloomComposer.render();
             scene.traverse(restoreMaterial);
             finalComposer.render();
         }
 
-        // Functions to Darken Non-Bloomed Objects
         function darkenNonBloomed(obj) {
             if (obj.isMesh && bloomLayer.test(obj.layers) === false) {
                 materials[obj.uuid] = obj.material;
@@ -220,13 +203,11 @@
             }
         }
 
-        // Handle Window Resize
         window.addEventListener('resize', onWindowResize, false);
 
         function onWindowResize() {
             const width = window.innerWidth;
             const height = window.innerHeight;
-
             camera.aspect = width / height;
             camera.updateProjectionMatrix();
             renderer.setSize(width, height);
@@ -235,7 +216,6 @@
         }
 
         animate();
-
     </script>
 </body>
 
